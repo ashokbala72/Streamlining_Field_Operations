@@ -1,0 +1,4 @@
+fault_code,equipment,avg_resolution_time,common_fix,risk_notes
+TX-OVR,Transformer,3h,Cooling fan replacement,High ambient temp impact
+INV-FLT,Inverter,1.5h,Fuse reset,Caused by humidity
+LV-TRIP,LV Switch,2h,Breaker replacement,Urban overload scenario

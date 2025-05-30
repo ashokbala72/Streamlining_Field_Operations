@@ -1,0 +1,5 @@
+name,skills,status,distance_km
+Alice,"GEN203,TRF101",available,5.2
+Bob,CB404,available,3.5
+Charlie,"INVT555,GEN203",unavailable,8.0
+Diana,"TRF101,CB404",available,2.7

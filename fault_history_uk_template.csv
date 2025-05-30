@@ -1,0 +1,4 @@
+fault_code,equipment,location,avg_resolution_time,common_fix,risk_notes,closed_time
+GEN203,Generator,Zone A,85,Reset breaker,Overload,
+TRF101,Transformer,Zone B,65,Replace fuse,Thermal wear,2024-12-01 13:45:00
+CB404,Circuit Breaker,Zone C,120,Check control panel,Relay failure,2025-01-15 09:30:00
