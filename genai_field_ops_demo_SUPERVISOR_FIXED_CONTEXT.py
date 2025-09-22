@@ -136,7 +136,7 @@ def calculate_ineffective_techs(faults_df):
 # ---------- Load CSV Data ----------
 fault_history = normalize_columns(pd.read_csv("fault_history_uk_template.csv"))
 technicians = normalize_columns(pd.read_csv("technicians_uk_template.csv"))
-# ---------- TABS ----------
+
 # ---------- TABS ----------
 tabs = st.tabs([
     "📊 Overview",
