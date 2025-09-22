@@ -4,11 +4,25 @@ import datetime
 import random
 from dotenv import load_dotenv
 import os
-from openai import OpenAI
+from openai import AzureOpenAI
 
-# Load environment variables from .env
+# -----------------------------
+# Load environment variables
+# -----------------------------
 load_dotenv()
-client = OpenAI()
+AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
+AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
+AZURE_OPENAI_API_VERSION = "2024-12-01-preview"
+AZURE_OPENAI_DEPLOYMENT_NAME = "gpt-4o-raj"
+
+# -----------------------------
+# Azure OpenAI Client
+# -----------------------------
+client = AzureOpenAI(
+    api_key=AZURE_OPENAI_API_KEY,
+    api_version=AZURE_OPENAI_API_VERSION,
+    azure_endpoint=AZURE_OPENAI_ENDPOINT
+)
 
 # ---------- CSS FIX FOR TABS ----------
 st.markdown("""
@@ -34,8 +48,6 @@ def convert_to_numeric(df, columns):
     for col in columns:
         df[col] = pd.to_numeric(df[col], errors='coerce')
     return df
-
-
 
 def simulate_new_fault(n=1):
     if "simulated_faults" not in st.session_state:
@@ -81,11 +93,11 @@ def simulate_new_fault(n=1):
             fault["status"] = next_status
             break  # Promote only one per refresh
 
-
 def genai_response(prompt: str, stream: bool = True) -> str:
+    """Call Azure OpenAI with streaming or non-streaming response."""
     try:
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model=AZURE_OPENAI_DEPLOYMENT_NAME,
             messages=[
                 {"role": "system", "content": "You are a field operations supervisor assistant for an energy utility. The application includes modules for fault forecasting, spare part planning, technician load analysis, and predictive risk. Always answer based on operational context from these modules. Do not refer to weather forecasts or general-purpose advice."},
                 {"role": "user", "content": prompt},
@@ -123,7 +135,7 @@ technicians = normalize_columns(pd.read_csv("technicians_uk_template.csv"))
 
 # ---------- TABS ----------
 tabs = st.tabs([
-"📊 Overview",
+    "📊 Overview",
     "🚨 Live Faults",
     "🛠 Work Orders",
     "📈 Dashboard",
@@ -135,6 +147,9 @@ tabs = st.tabs([
     "📋 Work Order Status",
     "🔮 Forecast Issues & Spare Part Planning"
 ])
+
+# ---------- (The rest of your tab logic stays the same) ----------
+# All calls to genai_response() now go via Azure OpenAI
 
 # ---------- Overview ----------
 with tabs[0]:
