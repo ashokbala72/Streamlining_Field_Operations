@@ -94,7 +94,7 @@ def simulate_new_fault(n=1):
             break  # Promote only one per refresh
 
 def genai_response(prompt: str, stream: bool = True) -> str:
-    """Call Azure OpenAI with streaming or non-streaming response."""
+    """Call Azure OpenAI with safe handling for empty responses."""
     try:
         response = client.chat.completions.create(
             model=AZURE_OPENAI_DEPLOYMENT_NAME,
@@ -110,11 +110,15 @@ def genai_response(prompt: str, stream: bool = True) -> str:
         if stream:
             collected_chunks = []
             for chunk in response:
-                chunk_message = getattr(chunk.choices[0].delta, "content", "") or ""
-                collected_chunks.append(chunk_message)
-            return "".join(collected_chunks).strip()
+                if hasattr(chunk, "choices") and chunk.choices:
+                    chunk_message = getattr(chunk.choices[0].delta, "content", "") or ""
+                    collected_chunks.append(chunk_message)
+            return "".join(collected_chunks).strip() if collected_chunks else "⚠️ No content returned from Azure OpenAI."
         else:
-            return response.choices[0].message.content.strip()
+            if response.choices and response.choices[0].message:
+                return response.choices[0].message.content.strip()
+            else:
+                return "⚠️ No response from Azure OpenAI."
 
     except Exception as e:
         return f"❗️ GenAI API error: {e}"
@@ -132,7 +136,6 @@ def calculate_ineffective_techs(faults_df):
 # ---------- Load CSV Data ----------
 fault_history = normalize_columns(pd.read_csv("fault_history_uk_template.csv"))
 technicians = normalize_columns(pd.read_csv("technicians_uk_template.csv"))
-
 # ---------- TABS ----------
 tabs = st.tabs([
     "📊 Overview",
@@ -162,8 +165,6 @@ with tabs[0]:
     - 💬 **Supervisor Chat**
     - 📉 **Ineffective Technician Tracking**
     - 🏢 **Executive Management Tab**
-
-    Use the tabs above to explore each function.
     """)
 
 # ---------- Live Faults ----------
@@ -240,6 +241,7 @@ with tabs[2]:
         else:
             st.info("No available technicians at the moment.")
 
+# (… and continue with Dashboard, Supervisor Chat, Ineffective Techs, Staffing, Risk Advisory, Management, Work Order Status, Forecast Issues)
 # ---------- Dashboard ----------
 with tabs[3]:
     st.header("📊 Operational Dashboard & Insights")
@@ -276,9 +278,10 @@ Most Common Fault Codes:
 {top_faults_list}
 
 Generate:
-1. Specific insights
+1. Specific insights (e.g., which zone/equipment is underperforming)
 2. Root cause hypotheses
-3. Actionable next steps
+3. Actionable next steps (e.g., staffing, training, spares, alerts)
+Avoid generic advice. Refer only to this data.
 """
     st.success(genai_response(data_prompt))
 
@@ -296,8 +299,6 @@ with tabs[4]:
         else:
             st.success(response)
 
-# (Other tabs remain the same, all use genai_response → Azure OpenAI)
-
 # ---------- Ineffective Techs ----------
 with tabs[5]:
     st.header("📉 Ineffective Technician Tracker")
@@ -311,6 +312,46 @@ with tabs[5]:
         report = calculate_ineffective_techs(df)
         st.dataframe(report)
         st.download_button("📥 Download Fault Assignment Log", df.to_csv(index=False), file_name="fault_log.csv")
+
+# ---------- Management ----------
+with tabs[6]:
+    st.header("📈 Executive Management View")
+    if "simulated_faults" not in st.session_state or not st.session_state.simulated_faults:
+        st.info("No data available yet.")
+    else:
+        df = pd.DataFrame(st.session_state.simulated_faults)
+        df["timestamp"] = pd.to_datetime(df["timestamp"], errors='coerce')
+        df["assigned_time"] = pd.to_datetime(df["assigned_time"], errors='coerce')
+        df["closed_time"] = pd.to_datetime(df["closed_time"], errors='coerce')
+        df["in_progress_time"] = pd.to_datetime(df.get("in_progress_time"), errors='coerce')
+
+        st.subheader("📊 Fault Summary")
+        st.metric("Total Faults", len(df))
+        st.metric("Unresolved Faults", df["closed_time"].isnull().sum())
+
+        valid_mask = df["closed_time"].notna() & df["in_progress_time"].notna()
+        if valid_mask.any():
+            avg_resolution = (df.loc[valid_mask, "closed_time"] - df.loc[valid_mask, "in_progress_time"]).mean()
+        else:
+            avg_resolution = None
+        st.metric("Avg. Resolution Time", str(avg_resolution) if avg_resolution is not None else "-")
+
+        st.subheader("🗺️ Faults by Zone")
+        zone_counts = df["location"].value_counts().reset_index()
+        zone_counts.columns = ["Zone", "Count"]
+        st.bar_chart(zone_counts.set_index("Zone"))
+
+        st.subheader("⚙️ Technician Performance")
+        if "technician" in df.columns:
+            tech_summary = df["technician"].value_counts().reset_index()
+            tech_summary.columns = ["Technician", "Faults Assigned"]
+            st.table(tech_summary)
+
+        st.subheader("🧠 GenAI Recommended Actions")
+        prompt = "Recommend executive actions based on fault and technician performance data."
+        st.markdown(genai_response(prompt))
+
+        st.download_button("📥 Download Executive Summary CSV", df.to_csv(index=False), file_name="management_summary.csv")
 
 # ---------- Staffing Adequacy ----------
 with tabs[7]:
@@ -384,46 +425,6 @@ Avoid any guesswork or generic output. Use data only.
     else:
         st.info("Historical fault data is missing or empty.")
 
-# ---------- Management ----------
-with tabs[6]:
-    st.header("📈 Executive Management View")
-    if "simulated_faults" not in st.session_state or not st.session_state.simulated_faults:
-        st.info("No data available yet.")
-    else:
-        df = pd.DataFrame(st.session_state.simulated_faults)
-        df["timestamp"] = pd.to_datetime(df["timestamp"], errors='coerce')
-        df["assigned_time"] = pd.to_datetime(df["assigned_time"], errors='coerce')
-        df["closed_time"] = pd.to_datetime(df["closed_time"], errors='coerce')
-        df["in_progress_time"] = pd.to_datetime(df.get("in_progress_time"), errors='coerce')
-
-        st.subheader("📊 Fault Summary")
-        st.metric("Total Faults", len(df))
-        st.metric("Unresolved Faults", df["closed_time"].isnull().sum())
-
-        valid_mask = df["closed_time"].notna() & df["in_progress_time"].notna()
-        if valid_mask.any():
-            avg_resolution = (df.loc[valid_mask, "closed_time"] - df.loc[valid_mask, "in_progress_time"]).mean()
-        else:
-            avg_resolution = None
-        st.metric("Avg. Resolution Time", str(avg_resolution) if avg_resolution is not None else "-")
-
-        st.subheader("🗺️ Faults by Zone")
-        zone_counts = df["location"].value_counts().reset_index()
-        zone_counts.columns = ["Zone", "Count"]
-        st.bar_chart(zone_counts.set_index("Zone"))
-
-        st.subheader("⚙️ Technician Performance")
-        if "technician" in df.columns:
-            tech_summary = df["technician"].value_counts().reset_index()
-            tech_summary.columns = ["Technician", "Faults Assigned"]
-            st.table(tech_summary)
-
-        st.subheader("🧠 GenAI Recommended Actions")
-        prompt = "Recommend executive actions based on fault and technician performance data."
-        st.markdown(genai_response(prompt))
-
-        st.download_button("📥 Download Executive Summary CSV", df.to_csv(index=False), file_name="management_summary.csv")
-
 # ---------- Work Order Status ----------
 with tabs[9]:
     st.header("📋 Work Order Status")
@@ -434,18 +435,11 @@ with tabs[9]:
         df["Work Order"] = df["fault_code"] + " - " + df["equipment"] + " (" + df["location"] + ")"
         df["Summary"] = "Fault in " + df["equipment"] + " at " + df["location"]
         df["Tech Assigned"] = df["technician"].fillna("Unassigned")
-        
-        possible_statuses = [
-            "Not Attended Yet",
-            "Attended but Yet to Fix",
-            "Not Able to Fix due to Parts Availability",
-            "Fixed – Pending Confirmation"
-        ]
         df["Status"] = df["status"]
-        
+
         st.dataframe(df[["Work Order", "Summary", "Tech Assigned", "Status"]])
 
-
+# ---------- Forecast Issues & Spare Part Planning ----------
 with tabs[10]:
     st.header("🔮 Forecast Issues & Spare Part Planning")
 
@@ -454,7 +448,6 @@ with tabs[10]:
     else:
         df = pd.DataFrame(st.session_state.simulated_faults)
 
-        # Extract basic context for GenAI
         fault_counts = df["fault_code"].value_counts().to_dict()
         equipment_counts = df["equipment"].value_counts().to_dict()
         zone_counts = df["location"].value_counts().to_dict()
