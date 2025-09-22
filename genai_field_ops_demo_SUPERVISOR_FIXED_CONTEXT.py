@@ -92,6 +92,24 @@ def simulate_new_fault(n=1):
                 fault["assigned_time"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             fault["status"] = next_status
             break  # Promote only one per refresh
+            
+def explain_fault_code(fault_code: str, equipment: str, zone: str) -> str:
+    """Give a direct GenAI explanation for a specific fault code."""
+    # Try history lookup first
+    match = fault_history[fault_history["fault_code"] == fault_code]
+    notes = ""
+    if not match.empty:
+        row = match.iloc[0]
+        notes = f"Known Fix: {row.get('common_fix','N/A')} | Risk: {row.get('risk_notes','N/A')}"
+    
+    prompt = f"""
+    You are analyzing field faults. Explain fault code {fault_code} in {equipment} at {zone}.
+    - Provide root cause hypotheses
+    - Suggest preventive measures
+    - Mention fix if known
+    {notes}
+    """
+    return genai_response(prompt, stream=False)
 
 def genai_response(prompt: str, stream: bool = True) -> str:
     """Call Azure OpenAI with safe handling for empty responses."""
