@@ -148,23 +148,20 @@ tabs = st.tabs([
     "🔮 Forecast Issues & Spare Part Planning"
 ])
 
-# ---------- (The rest of your tab logic stays the same) ----------
-# All calls to genai_response() now go via Azure OpenAI
-
 # ---------- Overview ----------
 with tabs[0]:
     st.title("GenAI Field Operations Assistant")
     st.markdown("""
     This GenAI Field Operations Assistant is designed to streamline end-to-end fault management for field teams using real-time data and AI. Here’s what it includes:
 
-    - 🔍 **Root Cause Analysis**: GenAI explains likely causes of faults based on historical patterns.
-    - 🔧 **Maintenance Recommendations**: Work orders include fix suggestions and risk summaries.
-    - 👷 **Technician Suitability & Assignment**: Technicians are matched using skills and proximity.
-    - 🚨 **Live Fault Simulation**: Simulates new faults, tracks status changes from New → Assigned → In Progress → Closed.
-    - 📈 **Dashboard Insights**: Summarizes operational trends and leverages GenAI for data-driven recommendations.
-    - 💬 **Supervisor Chat**: Allows open-ended Q&A with GenAI. Use it to get strategic advice, summaries, or troubleshoot issues. *Note: GPT-3.5 is used for faster and cost-effective answers.*
-    - 📉 **Ineffective Technician Tracking**: Identifies technicians with frequent unresolved faults or pending tasks.
-    - 🏢 **Executive Management Tab**: Provides KPIs, zone breakdowns, and AI-recommended actions.
+    - 🔍 **Root Cause Analysis**
+    - 🔧 **Maintenance Recommendations**
+    - 👷 **Technician Suitability & Assignment**
+    - 🚨 **Live Fault Simulation**
+    - 📈 **Dashboard Insights**
+    - 💬 **Supervisor Chat**
+    - 📉 **Ineffective Technician Tracking**
+    - 🏢 **Executive Management Tab**
 
     Use the tabs above to explore each function.
     """)
@@ -279,12 +276,10 @@ Most Common Fault Codes:
 {top_faults_list}
 
 Generate:
-1. Specific insights (e.g., which zone/equipment is underperforming)
+1. Specific insights
 2. Root cause hypotheses
-3. Actionable next steps (e.g., staffing, training, spares, alerts)
-Avoid generic advice. Refer only to this data.
+3. Actionable next steps
 """
-
     st.success(genai_response(data_prompt))
 
 # ---------- Supervisor Chat ----------
@@ -300,6 +295,8 @@ with tabs[4]:
             st.warning("⚠️ GenAI returned an empty response.")
         else:
             st.success(response)
+
+# (Other tabs remain the same, all use genai_response → Azure OpenAI)
 
 # ---------- Ineffective Techs ----------
 with tabs[5]:
