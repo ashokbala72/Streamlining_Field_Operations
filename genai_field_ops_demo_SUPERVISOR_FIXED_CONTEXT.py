@@ -99,7 +99,7 @@ def genai_response(prompt: str, stream: bool = True) -> str:
         response = client.chat.completions.create(
             model=AZURE_OPENAI_DEPLOYMENT_NAME,
             messages=[
-                {"role": "system", "content": "You are a field operations supervisor assistant for an energy utility. Always base responses on real module outputs (faults, spares, tech load, risks)."},
+                {"role": "system", "content": "You are a field operations supervisor assistant for an energy utility. The app includes modules for fault forecasting, spare part planning, technician load analysis, and predictive risk. Base answers strictly on provided module context."},
                 {"role": "user", "content": prompt},
             ],
             max_tokens=1000,
@@ -135,8 +135,7 @@ def calculate_ineffective_techs(faults_df):
 
 # ---------- Load CSV Data ----------
 fault_history = normalize_columns(pd.read_csv("fault_history_uk_template.csv"))
-technicians = normalize_columns(pd.read_csv("technicians_uk_template.csv"))
-
+technicians   = normalize_columns(pd.read_csv("technicians_uk_template.csv"))
 # ---------- TABS ----------
 tabs = st.tabs([
     "📊 Overview",
@@ -210,11 +209,17 @@ with tabs[2]:
         df_sim["timestamp"] = pd.to_datetime(df_sim["timestamp"], errors='coerce')
         selected_index = st.selectbox("Select a fault to process", df_sim.index[::-1])
         selected = df_sim.loc[selected_index]
-        available = technicians[technicians["status"].str.lower() == "available"].copy()
 
+        available = technicians[technicians["status"].str.lower() == "available"].copy() if "status" in technicians.columns else technicians.copy()
         if not available.empty:
             fault_code = selected["fault_code"]
-            available["skill_match"] = available["skills"].apply(lambda x: 1 if fault_code in x else 0)
+            if "skills" in available.columns:
+                available["skill_match"] = available["skills"].apply(lambda x: 1 if isinstance(x, str) and fault_code in x else 0)
+            else:
+                available["skill_match"] = 0
+            if "distance_km" not in available.columns:
+                available["distance_km"] = 9999
+
             best_tech = available.sort_values(["skill_match", "distance_km"], ascending=[False, True]).iloc[0]
             tech_name = best_tech["name"]
 
@@ -223,12 +228,16 @@ with tabs[2]:
             st.session_state.simulated_faults[selected_index]["assigned_time"] = now_str
             st.session_state.simulated_faults[selected_index]["technician"] = tech_name
 
-            st.markdown(f"**🧑‍🔧 Assigned:** {tech_name} ({best_tech['skills']})")
+            st.markdown(f"**🧑‍🔧 Assigned:** {tech_name} ({best_tech.get('skills','-')})")
             prompt = f"Why did fault code {selected['fault_code']} occur in equipment {selected['equipment']} located at {selected['location']}?"
             st.info(genai_response(prompt))
 
-            match = fault_history[fault_history["fault_code"] == selected["fault_code"]]
-            row = match.iloc[0] if not match.empty else {}
+            # Enrich with historical notes if available
+            if "fault_code" in fault_history.columns:
+                match = fault_history[fault_history["fault_code"] == selected["fault_code"]]
+                row = match.iloc[0] if not match.empty else {}
+            else:
+                row = {}
 
             st.markdown(f"""
 **Work Order Summary**
@@ -242,10 +251,13 @@ with tabs[2]:
 """)
         else:
             st.info("No available technicians at the moment.")
+
 # ---------- Dashboard ----------
 with tabs[3]:
     st.header("📊 Operational Dashboard & Insights")
-    fault_history = convert_to_numeric(fault_history, ["avg_resolution_time"])
+    # Safely convert numeric if the column exists
+    if "avg_resolution_time" in fault_history.columns:
+        fault_history = convert_to_numeric(fault_history, ["avg_resolution_time"])
 
     st.subheader("📍 Fault Volume by Zone")
     zone_stats = fault_history["location"].value_counts().reset_index()
@@ -253,17 +265,23 @@ with tabs[3]:
     st.bar_chart(zone_stats.set_index("Zone"))
 
     st.subheader("⏱ Avg. Resolution Time by Equipment")
-    avg_res_by_eq = fault_history.groupby("equipment")["avg_resolution_time"].mean().reset_index()
-    st.bar_chart(avg_res_by_eq.set_index("equipment"))
+    if "avg_resolution_time" in fault_history.columns:
+        avg_res_by_eq = fault_history.groupby("equipment")["avg_resolution_time"].mean().reset_index()
+        st.bar_chart(avg_res_by_eq.set_index("equipment"))
+    else:
+        st.info("No 'avg_resolution_time' column in history to chart.")
 
     st.subheader("📌 Top Fault Types")
-    top_faults = fault_history["fault_code"].value_counts().head(5)
-    st.table(top_faults.reset_index().rename(columns={"index": "Fault Code", "fault_code": "Occurrences"}))
+    top_faults = fault_history["fault_code"].value_counts().head(5) if "fault_code" in fault_history.columns else pd.Series(dtype=int)
+    if not top_faults.empty:
+        st.table(top_faults.reset_index().rename(columns={"index": "Fault Code", "fault_code": "Occurrences"}))
+    else:
+        st.info("No fault_code column present.")
 
     st.subheader("🧠 GenAI Insights")
     top_zones = zone_stats.sort_values("Faults", ascending=False).head(3).to_dict(orient="records")
-    top_equipment = avg_res_by_eq.sort_values("avg_resolution_time", ascending=False).head(3).to_dict(orient="records")
-    top_faults_list = top_faults.head(3).to_dict()
+    top_equipment = avg_res_by_eq.sort_values("avg_resolution_time", ascending=False).head(3).to_dict(orient="records") if "avg_resolution_time" in fault_history.columns else []
+    top_faults_list = top_faults.head(3).to_dict() if not top_faults.empty else {}
 
     data_prompt = f"""
 You are a field operations strategist reviewing fault management metrics. Based on the following:
@@ -278,10 +296,10 @@ Most Common Fault Codes:
 {top_faults_list}
 
 Generate:
-1. Specific insights (e.g., which zone/equipment is underperforming)
-2. Root cause hypotheses
-3. Actionable next steps (e.g., staffing, training, spares, alerts)
-Avoid generic advice. Refer only to this data.
+1) Specific insights (underperforming zones/equipment),
+2) Root-cause hypotheses,
+3) Actionable next steps (staffing, training, spares, alerts).
+Use only the data above.
 """
     st.success(genai_response(data_prompt))
 
@@ -310,8 +328,9 @@ with tabs[5]:
         df["closed_time"] = pd.to_datetime(df["closed_time"], errors='coerce')
         df["status"] = df["status"].fillna("New")
         report = calculate_ineffective_techs(df)
-        st.dataframe(report)
+        st.dataframe(report, use_container_width=True)
         st.download_button("📥 Download Fault Assignment Log", df.to_csv(index=False), file_name="fault_log.csv")
+
 # ---------- Management ----------
 with tabs[6]:
     st.header("📈 Executive Management View")
@@ -344,7 +363,7 @@ with tabs[6]:
             st.table(tech_summary)
 
         st.subheader("🧠 GenAI Recommended Actions")
-        prompt = "Recommend executive actions based on fault and technician performance data."
+        prompt = "Recommend executive actions based on fault and technician performance data present in the app."
         st.markdown(genai_response(prompt))
 
         st.download_button("📥 Download Executive Summary CSV", df.to_csv(index=False), file_name="management_summary.csv")
@@ -353,16 +372,12 @@ with tabs[6]:
 with tabs[7]:
     st.header("📊 Staffing Adequacy Analysis")
     if not fault_history.empty:
-        zone_faults = fault_history["location"].value_counts().to_dict()
+        zone_faults = fault_history["location"].value_counts().to_dict() if "location" in fault_history.columns else {}
         tech_distribution = technicians["preferred_zone"].value_counts().to_dict() if "preferred_zone" in technicians.columns else {}
-        unresolved_by_zone = fault_history[fault_history["closed_time"].isnull()]["location"].value_counts().to_dict()
+        unresolved_by_zone = fault_history[fault_history["closed_time"].isnull()]["location"].value_counts().to_dict() if "closed_time" in fault_history.columns and "location" in fault_history.columns else {}
 
         staffing_prompt = f"""
-You are analyzing field technician adequacy using real data:
-
-📊 Fault Summary:
-- Total Faults: {len(fault_history)}
-- Unresolved Faults: {fault_history['closed_time'].isnull().sum()}
+You are analyzing field technician adequacy:
 
 📍 Faults by Zone:
 {zone_faults}
@@ -373,13 +388,7 @@ You are analyzing field technician adequacy using real data:
 🛑 Unresolved Faults by Zone:
 {unresolved_by_zone}
 
-✅ Assess:
-- Which zones have a technician shortfall?
-- Where are unresolved faults piling up?
-- Recommend zone reassignments or hiring.
-- Suggest cross-training if needed.
-
-Focus strictly on the data above. Avoid generic advice.
+Provide: zone shortfalls, reassignments/hiring, cross-training suggestions.
 """
         st.success(genai_response(staffing_prompt))
     else:
@@ -389,33 +398,25 @@ Focus strictly on the data above. Avoid generic advice.
 with tabs[8]:
     st.header("🧠 Predictive Risk Advisory")
     if not fault_history.empty:
-        top_faults = fault_history["fault_code"].value_counts().head(5).index.tolist()
-        risk_context = fault_history[fault_history["fault_code"].isin(top_faults)]
+        top_faults = fault_history["fault_code"].value_counts().head(5).index.tolist() if "fault_code" in fault_history.columns else []
+        risk_context = fault_history[fault_history["fault_code"].isin(top_faults)] if top_faults else fault_history
 
-        risk_by_zone = risk_context["location"].value_counts().to_dict()
-        risk_by_equipment = risk_context["equipment"].value_counts().to_dict()
-        fix_notes = risk_context[["fault_code", "common_fix", "risk_notes"]].dropna().drop_duplicates().to_dict(orient="records")
+        risk_by_zone = risk_context["location"].value_counts().to_dict() if "location" in risk_context.columns else {}
+        risk_by_equipment = risk_context["equipment"].value_counts().to_dict() if "equipment" in risk_context.columns else {}
+        fix_notes = (risk_context[["fault_code", "common_fix", "risk_notes"]]
+                     .dropna()
+                     .drop_duplicates()
+                     .to_dict(orient="records")) if set(["fault_code","common_fix","risk_notes"]).issubset(risk_context.columns) else []
 
         risk_prompt = f"""
-You are a predictive risk strategist. Use the following real fault data:
+Use the following real fault data to produce risk predictions and preventive tasks:
 
 🔥 Top Fault Codes: {top_faults}
+🗺️ Faults by Zone: {risk_by_zone}
+⚙️ Faults by Equipment: {risk_by_equipment}
+🛠 Past Fixes and Risk Notes: {fix_notes}
 
-🗺️ Faults by Zone:
-{risk_by_zone}
-
-⚙️ Faults by Equipment:
-{risk_by_equipment}
-
-🛠 Past Fixes and Risk Notes:
-{fix_notes}
-
-Generate:
-1. Risk predictions specific to fault+zone+equipment patterns
-2. Suggested preventive tasks and inspections
-3. Insights backed by recurrence and past fixes
-
-Avoid any guesswork or generic output. Use data only.
+Return concrete, data-backed actions.
 """
         st.success(genai_response(risk_prompt))
     else:
@@ -432,7 +433,7 @@ with tabs[9]:
         df["Summary"] = "Fault in " + df["equipment"] + " at " + df["location"]
         df["Tech Assigned"] = df["technician"].fillna("Unassigned")
         df["Status"] = df["status"]
-        st.dataframe(df[["Work Order", "Summary", "Tech Assigned", "Status"]])
+        st.dataframe(df[["Work Order", "Summary", "Tech Assigned", "Status"]], use_container_width=True)
 
 # ---------- Forecast Issues & Spare Part Planning ----------
 with tabs[10]:
@@ -442,26 +443,20 @@ with tabs[10]:
         st.info("No fault data available to analyze. Please simulate some faults.")
     else:
         df = pd.DataFrame(st.session_state.simulated_faults)
-
-        fault_counts = df["fault_code"].value_counts().to_dict()
-        equipment_counts = df["equipment"].value_counts().to_dict()
-        zone_counts = df["location"].value_counts().to_dict()
+        fault_counts = df["fault_code"].value_counts().to_dict() if "fault_code" in df.columns else {}
+        equipment_counts = df["equipment"].value_counts().to_dict() if "equipment" in df.columns else {}
+        zone_counts = df["location"].value_counts().to_dict() if "location" in df.columns else {}
 
         past_risks_prompt = f"""
 You are a predictive operations assistant.
-Use the following recent fault patterns to forecast upcoming issues and suggest spare parts to keep ready:
+Use recent patterns to forecast upcoming issues and spares to stage:
 
-🔧 Fault Code Frequencies:
-{fault_counts}
+🔧 Fault Code Frequencies: {fault_counts}
+⚙️ Equipment Affected: {equipment_counts}
+🗺️ Zones Impacted: {zone_counts}
 
-⚙️ Equipment Affected:
-{equipment_counts}
-
-🗺️ Zones Impacted:
-{zone_counts}
-
-Forecast the next likely fault types and where they may occur. Also list the spare parts or components that field teams should stock in advance.
-Be specific and data-driven.
+List likely next faults, impacted zones, and the spare parts/components to stock in advance.
 """
-        forecast = genai_response(past_risks_prompt)
+        forecast = genai_response(past_risks_prompt, stream=False)
         st.success(forecast)
+
