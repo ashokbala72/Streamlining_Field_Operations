@@ -339,18 +339,40 @@ Use only the data above.
     st.success(genai_response(data_prompt))
 
 # ---------- Supervisor Chat ----------
+# ---------- Supervisor Chat ----------
 with tabs[4]:
     st.header("💬 Ask GenAI (Supervisor Assistant)")
     question = st.text_input("Ask a field operations question:")
+
     if question:
+        # Collect module outputs to give GPT context
+        fault_counts = pd.DataFrame(st.session_state.simulated_faults)["fault_code"].value_counts().to_dict() if "simulated_faults" in st.session_state else {}
+        spare_shortages = st.session_state.get("spare_shortages", {})  # capture shortages in Spare Parts tab
+        staffing = technicians["status"].value_counts().to_dict()
+        risk_notes = fault_history[["fault_code", "risk_notes"]].dropna().drop_duplicates().to_dict(orient="records")
+
+        # Build a richer context prompt
+        context = f"""
+        Use the following operational data to answer supervisor questions:
+
+        🔮 Fault Forecasting: {fault_counts}
+        📦 Spare Part Shortages: {spare_shortages}
+        👷 Technician Load: {staffing}
+        ⚠️ Predictive Risks: {risk_notes}
+
+        Question: {question}
+        """
+
         with st.spinner("Thinking..."):
-            response = genai_response(question, stream=False)
+            response = genai_response(context, stream=False)
+
         if response.startswith("❗️"):
             st.error(response)
         elif response.strip() == "":
             st.warning("⚠️ GenAI returned an empty response.")
         else:
             st.success(response)
+
 
 # ---------- Ineffective Techs ----------
 with tabs[5]:
