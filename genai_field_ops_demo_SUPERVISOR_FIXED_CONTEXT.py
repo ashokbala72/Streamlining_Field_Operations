@@ -218,57 +218,74 @@ with tabs[1]:
     st.dataframe(df_live.sort_values("timestamp", ascending=False).fillna("-"))
 
 # ---------- Work Orders ----------
+# ---------- Work Orders ----------
 with tabs[2]:
     st.header("🛠️ Work Order Generator")
+
     if "simulated_faults" not in st.session_state or not st.session_state.simulated_faults:
         st.info("No faults to process. Please simulate faults first.")
     else:
+        # Convert simulated faults to DataFrame
         df_sim = pd.DataFrame(st.session_state.simulated_faults)
         df_sim["timestamp"] = pd.to_datetime(df_sim["timestamp"], errors='coerce')
+
+        # User selects a fault
         selected_index = st.selectbox("Select a fault to process", df_sim.index[::-1])
         selected = df_sim.loc[selected_index]
 
-        available = technicians[technicians["status"].str.lower() == "available"].copy() if "status" in technicians.columns else technicians.copy()
-        if not available.empty:
-            fault_code = selected["fault_code"]
-            if "skills" in available.columns:
-                available["skill_match"] = available["skills"].apply(lambda x: 1 if isinstance(x, str) and fault_code in x else 0)
-            else:
-                available["skill_match"] = 0
-            if "distance_km" not in available.columns:
-                available["distance_km"] = 9999
+        # Get available technicians
+        available = technicians[technicians["status"].str.lower() == "available"].copy()
 
-            best_tech = available.sort_values(["skill_match", "distance_km"], ascending=[False, True]).iloc[0]
+        if not available.empty:
+            # Match by skills & distance
+            fault_code = selected["fault_code"]
+            available["skill_match"] = available["skills"].apply(lambda x: 1 if fault_code in str(x) else 0)
+            best_tech = available.sort_values(
+                ["skill_match", "distance_km"],
+                ascending=[False, True]
+            ).iloc[0]
             tech_name = best_tech["name"]
 
+            # Update session state (assign fault)
             now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             st.session_state.simulated_faults[selected_index]["status"] = "Assigned"
             st.session_state.simulated_faults[selected_index]["assigned_time"] = now_str
             st.session_state.simulated_faults[selected_index]["technician"] = tech_name
 
-            st.markdown(f"**🧑‍🔧 Assigned:** {tech_name} ({best_tech.get('skills','-')})")
-            prompt = f"Why did fault code {selected['fault_code']} occur in equipment {selected['equipment']} located at {selected['location']}?"
-            st.info(genai_response(prompt))
+            st.markdown(f"**🧑‍🔧 Assigned Technician:** {tech_name} ({best_tech['skills']})")
 
-            # Enrich with historical notes if available
-            if "fault_code" in fault_history.columns:
-                match = fault_history[fault_history["fault_code"] == selected["fault_code"]]
-                row = match.iloc[0] if not match.empty else {}
-            else:
-                row = {}
+            # Lookup historical fixes
+            match = fault_history[fault_history["fault_code"] == fault_code]
+            fix = match.iloc[0]["common_fix"] if not match.empty and "common_fix" in match.columns else "N/A"
+            risk = match.iloc[0]["risk_notes"] if not match.empty and "risk_notes" in match.columns else "N/A"
 
+            # GenAI explanation
+            prompt = f"""
+            Explain fault code {selected['fault_code']} in equipment {selected['equipment']} at {selected['location']}.
+            Include:
+            - Likely root causes
+            - Preventive measures
+            - Recommended fixes
+            Historical notes: Fix={fix}, Risk={risk}
+            """
+            explanation = genai_response(prompt, stream=False)
+
+            st.markdown("### 📝 Work Order Summary")
             st.markdown(f"""
-**Work Order Summary**
+            - **Fault Code:** {selected['fault_code']}
+            - **Equipment:** {selected['equipment']}
+            - **Zone:** {selected['location']}
+            - **Fix (from history):** {fix}
+            - **Risk (from history):** {risk}
+            - **Assigned Technician:** {tech_name} at {now_str}
+            """)
 
-- Fault Code: {selected['fault_code']}
-- Equipment: {selected['equipment']}
-- Zone: {selected['location']}
-- Fix: {row.get('common_fix', 'N/A')}
-- Risk: {row.get('risk_notes', 'N/A')}
-- Assigned: {tech_name} at {now_str}
-""")
+            st.markdown("### 🤖 GenAI Explanation")
+            st.info(explanation)
+
         else:
             st.info("No available technicians at the moment.")
+
 
 # ---------- Dashboard ----------
 with tabs[3]:
