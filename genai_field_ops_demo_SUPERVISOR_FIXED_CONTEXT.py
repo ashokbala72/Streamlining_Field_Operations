@@ -99,7 +99,7 @@ def genai_response(prompt: str, stream: bool = True) -> str:
         response = client.chat.completions.create(
             model=AZURE_OPENAI_DEPLOYMENT_NAME,
             messages=[
-                {"role": "system", "content": "You are a field operations supervisor assistant for an energy utility. The application includes modules for fault forecasting, spare part planning, technician load analysis, and predictive risk. Always answer based on operational context from these modules. Do not refer to weather forecasts or general-purpose advice."},
+                {"role": "system", "content": "You are a field operations supervisor assistant for an energy utility. Always base responses on real module outputs (faults, spares, tech load, risks)."},
                 {"role": "user", "content": prompt},
             ],
             max_tokens=1000,
@@ -137,6 +137,7 @@ def calculate_ineffective_techs(faults_df):
 fault_history = normalize_columns(pd.read_csv("fault_history_uk_template.csv"))
 technicians = normalize_columns(pd.read_csv("technicians_uk_template.csv"))
 # ---------- TABS ----------
+# ---------- TABS ----------
 tabs = st.tabs([
     "📊 Overview",
     "🚨 Live Faults",
@@ -155,16 +156,18 @@ tabs = st.tabs([
 with tabs[0]:
     st.title("GenAI Field Operations Assistant")
     st.markdown("""
-    This GenAI Field Operations Assistant is designed to streamline end-to-end fault management for field teams using real-time data and AI. Here’s what it includes:
-
-    - 🔍 **Root Cause Analysis**
-    - 🔧 **Maintenance Recommendations**
-    - 👷 **Technician Suitability & Assignment**
-    - 🚨 **Live Fault Simulation**
-    - 📈 **Dashboard Insights**
-    - 💬 **Supervisor Chat**
-    - 📉 **Ineffective Technician Tracking**
-    - 🏢 **Executive Management Tab**
+    This assistant streamlines **end-to-end fault management** using real-time data + GenAI:
+    
+    - 🔍 Root Cause Analysis
+    - 🔧 Maintenance Recommendations
+    - 👷 Technician Suitability
+    - 🚨 Live Fault Simulation
+    - 📈 Dashboard Insights
+    - 💬 Supervisor Chat
+    - 📉 Ineffective Tech Tracking
+    - 🏢 Management KPIs
+    - 🧠 Predictive Risk
+    - 🔮 Spare Part Forecasting
     """)
 
 # ---------- Live Faults ----------
@@ -183,7 +186,6 @@ with tabs[1]:
     now = datetime.datetime.now()
     last_refresh = st.session_state.get("last_refresh_time", now)
     elapsed = (now - last_refresh).total_seconds()
-
     if elapsed > 60:
         simulate_new_fault(1)
         st.session_state["last_refresh_time"] = now
@@ -240,8 +242,6 @@ with tabs[2]:
 """)
         else:
             st.info("No available technicians at the moment.")
-
-# (… and continue with Dashboard, Supervisor Chat, Ineffective Techs, Staffing, Risk Advisory, Management, Work Order Status, Forecast Issues)
 # ---------- Dashboard ----------
 with tabs[3]:
     st.header("📊 Operational Dashboard & Insights")
@@ -312,7 +312,6 @@ with tabs[5]:
         report = calculate_ineffective_techs(df)
         st.dataframe(report)
         st.download_button("📥 Download Fault Assignment Log", df.to_csv(index=False), file_name="fault_log.csv")
-
 # ---------- Management ----------
 with tabs[6]:
     st.header("📈 Executive Management View")
@@ -330,10 +329,7 @@ with tabs[6]:
         st.metric("Unresolved Faults", df["closed_time"].isnull().sum())
 
         valid_mask = df["closed_time"].notna() & df["in_progress_time"].notna()
-        if valid_mask.any():
-            avg_resolution = (df.loc[valid_mask, "closed_time"] - df.loc[valid_mask, "in_progress_time"]).mean()
-        else:
-            avg_resolution = None
+        avg_resolution = (df.loc[valid_mask, "closed_time"] - df.loc[valid_mask, "in_progress_time"]).mean() if valid_mask.any() else None
         st.metric("Avg. Resolution Time", str(avg_resolution) if avg_resolution is not None else "-")
 
         st.subheader("🗺️ Faults by Zone")
@@ -436,7 +432,6 @@ with tabs[9]:
         df["Summary"] = "Fault in " + df["equipment"] + " at " + df["location"]
         df["Tech Assigned"] = df["technician"].fillna("Unassigned")
         df["Status"] = df["status"]
-
         st.dataframe(df[["Work Order", "Summary", "Tech Assigned", "Status"]])
 
 # ---------- Forecast Issues & Spare Part Planning ----------
@@ -468,6 +463,5 @@ Use the following recent fault patterns to forecast upcoming issues and suggest 
 Forecast the next likely fault types and where they may occur. Also list the spare parts or components that field teams should stock in advance.
 Be specific and data-driven.
 """
-
         forecast = genai_response(past_risks_prompt)
         st.success(forecast)
